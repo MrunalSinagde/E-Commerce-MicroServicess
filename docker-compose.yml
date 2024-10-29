@@ -1,0 +1,237 @@
+---
+version: '3.7'
+services:
+
+  #mysql for order service
+  mysql-order:
+    container_name: mysql-order
+    image: mysql:5.7
+    environment:
+      MYSQL_DATABASE: order-service  # Database name for order service
+      MYSQL_ROOT_PASSWORD: password         # MySQL root password
+#      MYSQL_USER: mysql               # MySQL user
+#      MYSQL_PASSWORD: password          # MySQL user password
+
+    volumes:
+      - ./mysql-order:/var/lib/mysql
+    ports:
+      - "3308:3306"
+    expose:
+      - "3308"
+    restart: unless-stopped
+
+  #mysql for inventory service
+  mysql-inventory:
+    container_name: mysql-inventory
+    image: mysql:5.7
+    environment:
+      MYSQL_DATABASE: inventory-service  # Database name for inventory service
+      MYSQL_ROOT_PASSWORD: password             # MySQL root password
+#      MYSQL_USER: mysql                   # MySQL user
+#      MYSQL_PASSWORD: password              # MySQL user password
+
+    volumes:
+      - ./mysql-inventory:/var/lib/mysql
+    ports:
+      - "3307:3306"   # Expose a different external port for inventory service MySQL
+    expose:
+      - "3307"
+    restart: unless-stopped
+
+  #mongo.yaml for product service
+  mongo:
+    container_name: mongo.yaml
+    image: mongo:4.4.14-rc0-focal
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    expose:
+      - "27017"
+    volumes:
+      - ./mongo.yaml-data:/data/db
+
+  #keycloak config with mysql database
+  keycloak-mysql:
+    container_name: keycloak-mysql
+    image: mysql:5.7
+    volumes:
+      - ./mysql_keycloak_data:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: keycloak
+      MYSQL_USER: keycloak
+      MYSQL_PASSWORD: password
+
+  #keycloak config
+  keycloak:
+    container_name: keycloak
+    image: quay.io/keycloak/keycloak:18.0.0
+    command: [ "start-dev", "--import-realm" ]
+    environment:
+      DB_VENDOR: MYSQL
+      DB_ADDR: mysql
+      DB_DATABASE: keycloak
+      DB_USER: keycloak
+      DB_PASSWORD: password
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./realms/:/opt/keycloak/data/import/
+    depends_on:
+      - keycloak-mysql
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.0.1
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  broker:
+    image: confluentinc/cp-kafka:7.0.1
+    container_name: broker
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://broker:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+
+  #Zipkin
+  zipkin:
+    image: openzipkin/zipkin
+    container_name: zipkin
+    ports:
+      - "9411:9411"
+
+  #Eureka server
+  discovery-server:
+    image: mrunal02/discoveryservice:latest
+    container_name: discoveryservice
+    pull_policy: always
+    ports:
+      - "8761:8761"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    command: ["java", "-Dspring.profiles.active=docker"]
+    depends_on:
+      - zipkin
+
+  #Api gateway
+  api-gateway:
+    image: mrunal02/apigateway:latest
+    container_name: apigateway
+    pull_policy: always
+    ports:
+      - "8181:8080"
+    expose:
+      - "8181"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY= TRACE
+    command: ["java", "-Dspring.profiles.active=docker"]
+    depends_on:
+      - zipkin
+      - discovery-server
+      - keycloak
+
+  #Product service
+  product-service:
+    container_name: product-service
+    image: mrunal02/product-service:latest
+    pull_policy: always
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    command: ["java", "-Dspring.profiles.active=docker"]
+    ports:
+      - "8084:8080"
+    depends_on:
+      - mongo
+      - discovery-server
+      - api-gateway
+
+  #Order service
+  order-service:
+    container_name: order-service
+    image: mrunal02/order-service:latest
+    pull_policy: always
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    command: ["java", "-Dspring.profiles.active=docker"]
+    ports:
+      - "8083:8080"
+    depends_on:
+      - mysql-order
+      - broker
+      - zipkin
+      - discovery-server
+      - api-gateway
+
+  #Inventory service
+  inventory-service:
+    container_name: inventory-service
+    image: mrunal02/inventory-service:latest
+    pull_policy: always
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    command: ["java", "-Dspring.profiles.active=docker"]
+    ports:
+      - "8082:8080"
+    depends_on:
+      - mysql-inventory
+      - discovery-server
+      - api-gateway
+
+  #Notification service
+  notification-service:
+    container_name: notification-service
+    image: mrunal02/notification-service:latest
+    pull_policy: always
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    command: ["java", "-Dspring.profiles.active=docker"]
+    ports:
+      - "8081:8080"
+    depends_on:
+      - zipkin
+      - broker
+      - discovery-server
+      - api-gateway
+
+  #Prometheus
+  prometheus:
+    image: prom/prometheus:v2.37.1
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - product-service
+      - inventory-service
+      - order-service
+      - notification-service
+
+  #Grafana
+  grafana:
+    image: grafana/grafana-oss:8.5.2
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    links:
+      - prometheus:prometheus
+    volumes:
+      - ./grafana:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=password
