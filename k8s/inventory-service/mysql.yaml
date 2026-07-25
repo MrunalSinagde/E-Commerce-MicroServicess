@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql-inventory-deployment
+  labels:
+    app: mysql-inventory
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-inventory
+  template:
+    metadata:
+      labels:
+        app: mysql-inventory
+    spec:
+      containers:
+        - name: mysql-inventory
+          image: mysql:5.7
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-inventory-secret
+                  key: mysql-user
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-inventory-secret
+                  key: mysql-password
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-inventory-secret
+                  key: mysql-password
+            - name: MYSQL_DATABASE
+              value: "inventory_service"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-inventory-service
+spec:
+  selector:
+    app: mysql-inventory
+  ports:
+    - protocol: TCP
+      port: 3306
+      targetPort: 3306

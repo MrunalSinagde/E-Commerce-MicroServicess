@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak-deployment
+  labels:
+    app: keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:18.0.0
+          command: ["/opt/keycloak/bin/kc.sh", "start-dev", "--import-realm"]
+          ports:
+            - containerPort: 8080
+          env:
+            - name: KC_HOSTNAME
+              value: keycloak-service
+            - name: DB_ADDR
+              valueFrom:
+                configMapKeyRef:
+                  name: mysql-keycloak-configmap
+                  key: mysql-url
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-keycloak-secret
+                  key: mysql-user
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-keycloak-secret
+                  key: mysql-password
+            - name: KEYCLOAK_ADMIN
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-keycloak-secret
+                  key: keycloak-admin
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-keycloak-secret
+                  key: keycloak-admin
+            - name: DB_DATABASE
+              value: "keycloak"
+            - name: DB_VENDOR
+              value: "MYSQL"
+            - name: SPRING_PROFILES_ACTIVE
+              value: "k8s"
+          volumeMounts:
+            - name: realm-config
+              mountPath: /opt/keycloak/data/import/realm-export.json
+              subPath: realm-export.json
+      volumes:
+        - name: realm-config
+          configMap:
+            name: mysql-keycloak-configmap
+            items:
+              - key: realm-export.json
+                path: realm-export.json
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-service
+spec:
+  type: NodePort
+  selector:
+    app: keycloak
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+      nodePort: 30105

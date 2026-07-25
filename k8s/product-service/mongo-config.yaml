@@ -3,4 +3,4 @@ kind: ConfigMap
 metadata:
   name: mongo-product-configmap
 data:
-  mongo-url: mongo-product-service
+  mongo-url: mongodb://mongo-product-service:27017

@@ -17,18 +17,27 @@ spec:
       containers:
         - name: product-service
           image: mrunal02/product-service:latest
-          args: ["-Dspring.profiles.active=k8s"]
           ports:
             - containerPort: 8084
+          env:
+            - name: DB_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: mongo-product-configmap
+                  key: mongo-url
+            - name: SPRING_PROFILES_ACTIVE
+              value: "k8s"
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: product-service
 spec:
+  type: NodePort
   selector:
     app: product-service
   ports:
     - protocol: TCP
       port: 8084
       targetPort: 8084
+      nodePort: 30100
